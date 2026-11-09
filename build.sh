@@ -20,13 +20,20 @@ clang --target=x86_64-pc-freebsd12-elf \
     -isystem "$OO_TOOLCHAIN/include" \
     src/main.c -o build/main.o
 
-# 2. Link into eboot.bin using proper SDK sysroot and library paths (-B)
+# 2. Link into eboot.bin using explicit SDK startup objects and libraries
 clang --target=x86_64-pc-freebsd12-elf \
-    -fuse-ld=lld -pie --rtlib=compiler-rt \
+    -fuse-ld=lld -pie \
     --sysroot="$OO_TOOLCHAIN" \
     -B"$OO_TOOLCHAIN/lib" \
     -L"$OO_TOOLCHAIN/lib" \
-    build/main.o -lkernel -lSceSystemService -lc -o eboot.bin
+    build/main.o \
+    "$OO_TOOLCHAIN/lib/crt1.o" \
+    "$OO_TOOLCHAIN/lib/crti.o" \
+    "$OO_TOOLCHAIN/lib/crtbeginS.o" \
+    -lkernel -lSceSystemService -lc \
+    "$OO_TOOLCHAIN/lib/crtendS.o" \
+    "$OO_TOOLCHAIN/lib/crtn.o" \
+    -o eboot.bin
 
 # 3. Create signed self binary
 create-fself -in eboot.bin -out eboot.bin.aced --lib "$OO_TOOLCHAIN/sce_module"
