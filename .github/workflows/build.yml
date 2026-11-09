@@ -15,10 +15,10 @@ jobs:
       - name: Run build script in Open Orbis Docker
         run: |
           chmod +x ./build.sh
-          docker run --rm -v "${PWD}:/workspace" -w /workspace openorbisofficial/toolchain:v0.5.1 ./build.sh
+          docker run --rm --user root -v "${PWD}:/workspace" -w /workspace openorbisofficial/toolchain:v0.5.1 ./build.sh
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: petscope-eboot
-          path: eboot.bin
+          name: petscope-pkg
+          path: petscope.pkg
