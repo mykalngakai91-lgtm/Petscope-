@@ -2,6 +2,9 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# Automatically strip Windows carriage returns if any crept in
+tr -d '\r' < build.sh > build.sh.tmp && mv build.sh.tmp build.sh 2>/dev/null || true
+
 echo "Starting direct Open Orbis build and packaging..."
 
 export OO_TOOLCHAIN="/lib/OpenOrbisSDK"
