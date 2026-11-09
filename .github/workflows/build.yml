@@ -1,5 +1,57 @@
-- name: Check required files
+name: build-pkg
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required files
         run: |
           for f in petscope/main.c petscope/Makefile petscope/assets/game/index.html; do
             [ -f "$f" ] || { echo "::error::missing $f"; exit 1; }
           done
+
+      - name: Show repo tree
+        run: find . -path ./.git -prune -o -type f -print | sort
+
+      - name: Make icon
+        run: |
+          mkdir -p petscope/sce_sys
+          python3 - <<'PY'
+          import zlib, struct
+          W = H = 512
+          def chunk(t, d):
+              c = t + d
+              return struct.pack(">I", len(d)) + c + struct.pack(">I", zlib.crc32(c) & 0xffffffff)
+          raw = b""
+          for y in range(H):
+              raw += b"\x00"
+              for x in range(W):
+                  dx, dy = x - 256, y - 256
+                  d = (dx*dx + dy*dy) ** 0.5
+                  raw += bytes((90,140,70)) if 150 < d < 200 else (bytes((12,20,12)) if d < 150 else bytes((6,10,7)))
+          png = b"\x89PNG\r\n\x1a\n"
+          png += chunk(b"IHDR", struct.pack(">IIBBBBB", W, H, 8, 2, 0, 0, 0))
+          png += chunk(b"IDAT", zlib.compress(raw, 9))
+          png += chunk(b"IEND", b"")
+          open("petscope/sce_sys/icon0.png","wb").write(png)
+          PY
+
+      - name: Build pkg
+        run: |
+          docker run --rm --user root -w /workspace -v "$PWD":/workspace \
+            openorbisofficial/toolchain:v0.5.1 \
+            bash -c "cd petscope && make && cp -f ./*.pkg ../"
+
+      - name: Upload pkg
+        uses: actions/upload-artifact@v4
+        with:
+          name: petscope-pkg
+          path: "*.pkg"
