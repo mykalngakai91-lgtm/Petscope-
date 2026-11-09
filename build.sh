@@ -20,10 +20,11 @@ clang --target=x86_64-pc-freebsd12-elf \
     -isystem "$OO_TOOLCHAIN/include" \
     src/main.c -o build/main.o
 
-# 2. Link into eboot.bin executable
+# 2. Link into eboot.bin using proper SDK sysroot and library paths (-B)
 clang --target=x86_64-pc-freebsd12-elf \
     -fuse-ld=lld -pie --rtlib=compiler-rt \
     --sysroot="$OO_TOOLCHAIN" \
+    -B"$OO_TOOLCHAIN/lib" \
     -L"$OO_TOOLCHAIN/lib" \
     build/main.o -lkernel -lSceSystemService -lc -o eboot.bin
 
