@@ -4,14 +4,14 @@ cd "$(dirname "$0")"
 
 echo "Starting direct Open Orbis build..."
 
-# Export toolchain environment paths
+# Set toolchain paths while keeping system PATH intact
 export OO_TOOLCHAIN="/lib/OpenOrbisSDK"
-export PATH="$OO_TOOLCHAIN/bin/linux:$PATH"
+export PATH="$PATH:$OO_TOOLCHAIN/bin/linux"
 
 # Move into project directory
 cd petscope
 
-# 1. Compile C source into an object file
+# 1. Compile main.c into an object file
 x86_64-pc-freebsd12-elf-clang --target=x86_64-pc-freebsd12-elf \
     -fPIC -funwind-tables -c \
     -isysroot "$OO_TOOLCHAIN" \
