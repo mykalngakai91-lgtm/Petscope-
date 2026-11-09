@@ -1,48 +1,74 @@
-TITLE       := PETSCOPE
-VERSION     := 1.00
-TITLE_ID    := PETSCOPE1
-CONTENT_ID  := IV0000-PETSCOPE1_00-0000000000000000
+#include <orbis/libkernel.h>
+#include <orbis/SystemService.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <unistd.h>
 
-LIBS        := -lc -lkernel -lSceSystemService
-ASSETS      := $(wildcard assets/**/*)
+#define PORT 1000
+#define PAGE "/app0/assets/game/index.html"
 
-TOOLCHAIN   := $(OO_PS4_TOOLCHAIN)
-INTDIR      := build
+static void send_all(int fd, const char *b, long n){
+  long off = 0, r;
+  while (off < n){ r = send(fd, b + off, n - off, 0); if (r <= 0) return; off += r; }
+}
 
-CFLAGS      := --target=x86_64-pc-freebsd12-elf -fPIC -funwind-tables -c -isysroot $(TOOLCHAIN) -isystem $(TOOLCHAIN)/include
-LDFLAGS     := -m elf_x86_64 -pie --script $(TOOLCHAIN)/link.x --eh-frame-hdr -L$(TOOLCHAIN)/lib $(LIBS) $(TOOLCHAIN)/lib/crt1.o
+static void serve(int fd){
+  char req[1024];
+  int n = recv(fd, req, sizeof(req) - 1, 0);
+  if (n <= 0) return;
+  req[n] = 0;
 
-CC          := clang
-LD          := ld.lld
+  if (strstr(req, "favicon")){
+    const char *h = "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n";
+    send_all(fd, h, strlen(h)); return;
+  }
 
-all: $(CONTENT_ID).pkg
+  FILE *f = fopen(PAGE, "rb");
+  if (!f){
+    const char *m = "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\nmissing page";
+    send_all(fd, m, strlen(m)); return;
+  }
 
-$(CONTENT_ID).pkg: pkg.gp4
-	$(TOOLCHAIN)/bin/linux/PkgTool.Core pkg_build $< .
+  fseek(f, 0, SEEK_END); long len = ftell(f); fseek(f, 0, SEEK_SET);
+  char *buf = malloc(len);
+  if (!buf){ fclose(f); return; }
+  fread(buf, 1, len, f); fclose(f);
 
-pkg.gp4: eboot.bin sce_sys/param.sfo sce_sys/icon0.png $(ASSETS)
-	$(TOOLCHAIN)/bin/linux/create-gp4 -out $@ --content-id=$(CONTENT_ID) --files "$^"
+  char hdr[256];
+  int hl = sprintf(hdr,
+    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
+    "Content-Length: %ld\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n", len);
+  send_all(fd, hdr, hl);
+  send_all(fd, buf, len);
+  free(buf);
+}
 
-sce_sys/param.sfo: Makefile
-	$(TOOLCHAIN)/bin/linux/PkgTool.Core sfo_new $@
-	$(TOOLCHAIN)/bin/linux/PkgTool.Core sfo_setentry $@ APP_TYPE --type Integer --maxsize 4 --value 1
-	$(TOOLCHAIN)/bin/linux/PkgTool.Core sfo_setentry $@ APP_VER --type Utf8 --maxsize 8 --value '$(VERSION)'
-	$(TOOLCHAIN)/bin/linux/PkgTool.Core sfo_setentry $@ ATTRIBUTE --type Integer --maxsize 4 --value 0
-	$(TOOLCHAIN)/bin/linux/PkgTool.Core sfo_setentry $@ CATEGORY --type Utf8 --maxsize 4 --value 'gd'
-	$(TOOLCHAIN)/bin/linux/PkgTool.Core sfo_setentry $@ CONTENT_ID --type Utf8 --maxsize 48 --value '$(CONTENT_ID)'
-	$(TOOLCHAIN)/bin/linux/PkgTool.Core sfo_setentry $@ DOWNLOAD_DATA_SIZE --type Integer --maxsize 4 --value 0
-	$(TOOLCHAIN)/bin/linux/PkgTool.Core sfo_setentry $@ SYSTEM_VER --type Integer --maxsize 4 --value 0
-	$(TOOLCHAIN)/bin/linux/PkgTool.Core sfo_setentry $@ TITLE --type Utf8 --maxsize 128 --value '$(TITLE)'
-	$(TOOLCHAIN)/bin/linux/PkgTool.Core sfo_setentry $@ TITLE_ID --type Utf8 --maxsize 12 --value '$(TITLE_ID)'
-	$(TOOLCHAIN)/bin/linux/PkgTool.Core sfo_setentry $@ VERSION --type Utf8 --maxsize 8 --value '$(VERSION)'
+int main(void){
+  int s = socket(AF_INET, SOCK_STREAM, 0);
+  if (s < 0) return 1;
+  int one = 1;
+  setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
 
-eboot.bin: build/main.o
-	$(LD) build/main.o -o build/app.elf $(LDFLAGS)
-	$(TOOLCHAIN)/bin/linux/create-fself -in=build/app.elf -out=build/app.oelf --eboot "eboot.bin" --paid 0x3800000000000011
+  struct sockaddr_in a;
+  memset(&a, 0, sizeof(a));
+  a.sin_family = AF_INET;
+  a.sin_port = htons(PORT);
+  a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 
-build/main.o: main.c
-	@mkdir -p build
-	$(CC) $(CFLAGS) -o $@ $<
+  if (bind(s, (struct sockaddr *)&a, sizeof(a)) < 0) return 1;
+  if (listen(s, 8) < 0) return 1;
 
-clean:
-	rm -rf build eboot.bin pkg.gp4 sce_sys/param.sfo *.pkg
+  sceSystemServiceLaunchWebBrowser("http://127.0.0.1:1000/", NULL);
+
+  for (;;){
+    int c = accept(s, NULL, NULL);
+    if (c < 0) continue;
+    serve(c);
+    close(c);
+  }
+  return 0;
+}
