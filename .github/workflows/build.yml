@@ -13,25 +13,8 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run Open Orbis Build & Package in Docker
-        run: |
-          docker run --rm --user root -v "${PWD}:/workspace" -w /workspace openorbisofficial/toolchain:v0.5.1 bash -c '
-            set -e
-            export OO_TOOLCHAIN="/lib/OpenOrbisSDK"
-            CREATE_FSELF=$(find "$OO_TOOLCHAIN" -name "create-fself" -print -quit)
-            PKG_TOOL=$(find "$OO_TOOLCHAIN" -name "PkgTool.Core" -print -quit)
-            echo "Found create-fself at: $CREATE_FSELF"
-            echo "Found PkgTool.Core at: $PKG_TOOL"
-            cd petscope
-            mkdir -p build
-            clang --target=x86_64-pc-freebsd12-elf -fPIC -pie -nostdlib --sysroot="$OO_TOOLCHAIN" -isystem "$OO_TOOLCHAIN/include" -L"$OO_TOOLCHAIN/lib" "$OO_TOOLCHAIN/lib/crt1.o" src/main.c -lc -lkernel -lSceSystemService "$OO_TOOLCHAIN/lib/crtn.o" -o eboot.bin
-            "$CREATE_FSELF" -in eboot.bin -out eboot.bin.aced --lib "$OO_TOOLCHAIN/sce_module"
-            if [[ "$PKG_TOOL" == *.dll ]]; then
-                dotnet "$PKG_TOOL" pkg build sce_sys/param.sfo . ../petscope.pkg
-            else
-                "$PKG_TOOL" pkg build sce_sys/param.sfo . ../petscope.pkg
-            fi
-            echo "Build and packaging completed successfully!"
-          '
+        uses: appleboy/ssh-action@master # (or run docker directly below)
+        run: docker run --rm --user root -v "${PWD}:/workspace" -w /workspace openorbisofficial/toolchain:v0.5.1 bash -c "set -e; export OO_TOOLCHAIN='/lib/OpenOrbisSDK'; CREATE_FSELF=\$(find \"\$OO_TOOLCHAIN\" -name 'create-fself' -print -quit); PKG_TOOL=\$(find \"\$OO_TOOLCHAIN\" -name 'PkgTool.Core' -print -quit); echo \"Found create-fself at: \$CREATE_FSELF\"; echo \"Found PkgTool.Core at: \$PKG_TOOL\"; cd petscope; mkdir -p build; clang --target=x86_64-pc-freebsd12-elf -fPIC -pie -nostdlib --sysroot=\"\$OO_TOOLCHAIN\" -isystem \"\$OO_TOOLCHAIN/include\" -L\"\$OO_TOOLCHAIN/lib\" \"\$OO_TOOLCHAIN/lib/crt1.o\" src/main.c -lc -lkernel -lSceSystemService \"\$OO_TOOLCHAIN/lib/crtn.o\" -o eboot.bin; \"\$CREATE_FSELF\" -in eboot.bin -out eboot.bin.aced --lib \"\$OO_TOOLCHAIN/sce_module\"; if [[ \"\$PKG_TOOL\" == *.dll ]]; then dotnet \"\$PKG_TOOL\" pkg build sce_sys/param.sfo . ../petscope.pkg; else \"\$PKG_TOOL\" pkg build sce_sys/param.sfo . ../petscope.pkg; fi; echo 'Build and packaging completed successfully!'"
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
