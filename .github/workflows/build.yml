@@ -1,197 +1,24 @@
-name: build-pkg
+name: Build PS4 PKG
+
 on:
   push:
+    branches: [ "main" ]
   workflow_dispatch:
-
-permissions:
-  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Write Makefile
+      - name: Run build script in Open Orbis Docker
         run: |
-          cat > petscope/Makefile <<'EOF'
-          .RECIPEPREFIX = >
-          TITLE       := PETSCOPE
-          VERSION     := 1.00
-          TITLE_ID    := PETSCOPE1
-          CONTENT_ID  := IV0000-PETSCOPE1_00-0000000000000000
+          chmod +x ./build.sh
+          docker run --rm -v "${PWD}:/workspace" -w /workspace openorbisofficial/toolchain:v0.5.1 ./build.sh
 
-          LIBS        := -lc -lkernel -lSceSystemService
-          ASSETS      := $(wildcard assets/**/*)
-
-          TOOLCHAIN   := $(OO_PS4_TOOLCHAIN)
-          INTDIR      := build
-
-          FSELF   := $(shell find $(TOOLCHAIN) /usr/local/bin /opt -type f -name 'create-fself*' 2>/dev/null | head -n1)
-          PKGTOOL := $(shell find $(TOOLCHAIN) /usr/local/bin /opt -type f -name 'PkgTool*' 2>/dev/null | head -n1)
-          GP4TOOL := $(shell find $(TOOLCHAIN) /usr/local/bin /opt -type f -name 'create-gp4*' 2>/dev/null | head -n1)
-
-          CFLAGS      := --target=x86_64-pc-freebsd12-elf -fPIC -funwind-tables -c -isysroot $(TOOLCHAIN) -isystem $(TOOLCHAIN)/include
-          LDFLAGS     := -m elf_x86_64 -pie --script $(TOOLCHAIN)/link.x --eh-frame-hdr -L$(TOOLCHAIN)/lib $(LIBS) $(TOOLCHAIN)/lib/crt1.o
-
-          CC          := clang
-          LD          := ld.lld
-
-          all: info $(CONTENT_ID).pkg
-
-          info:
-          > @echo "TOOLCHAIN=$(TOOLCHAIN)"
-          > @echo "FSELF=[$(FSELF)]"
-          > @echo "PKGTOOL=[$(PKGTOOL)]"
-          > @echo "GP4TOOL=[$(GP4TOOL)]"
-
-          $(CONTENT_ID).pkg: pkg.gp4
-          > $(PKGTOOL) pkg_build $< .
-
-          pkg.gp4: eboot.bin sce_sys/param.sfo sce_sys/icon0.png $(ASSETS)
-          > $(GP4TOOL) -out $@ --content-id=$(CONTENT_ID) --files "$^"
-
-          sce_sys/param.sfo: Makefile
-          > $(PKGTOOL) sfo_new $@
-          > $(PKGTOOL) sfo_setentry $@ APP_TYPE --type Integer --maxsize 4 --value 1
-          > $(PKGTOOL) sfo_setentry $@ APP_VER --type Utf8 --maxsize 8 --value '$(VERSION)'
-          > $(PKGTOOL) sfo_setentry $@ ATTRIBUTE --type Integer --maxsize 4 --value 0
-          > $(PKGTOOL) sfo_setentry $@ CATEGORY --type Utf8 --maxsize 4 --value 'gd'
-          > $(PKGTOOL) sfo_setentry $@ CONTENT_ID --type Utf8 --maxsize 48 --value '$(CONTENT_ID)'
-          > $(PKGTOOL) sfo_setentry $@ DOWNLOAD_DATA_SIZE --type Integer --maxsize 4 --value 0
-          > $(PKGTOOL) sfo_setentry $@ SYSTEM_VER --type Integer --maxsize 4 --value 0
-          > $(PKGTOOL) sfo_setentry $@ TITLE --type Utf8 --maxsize 128 --value '$(TITLE)'
-          > $(PKGTOOL) sfo_setentry $@ TITLE_ID --type Utf8 --maxsize 12 --value '$(TITLE_ID)'
-          > $(PKGTOOL) sfo_setentry $@ VERSION --type Utf8 --maxsize 8 --value '$(VERSION)'
-
-          eboot.bin: build/main.o
-          > @test -n "$(FSELF)" || { echo "no create-fself found"; exit 1; }
-          > $(LD) build/main.o -o build/app.elf $(LDFLAGS)
-          > $(FSELF) -in=build/app.elf -out=build/app.oelf --eboot "eboot.bin" --paid 0x3800000000000011
-
-          build/main.o: main.c
-          > @mkdir -p build
-          > $(CC) $(CFLAGS) -o $@ $<
-          EOF
-
-      - name: Write main.c
-        run: |
-          cat > petscope/main.c <<'EOF'
-          #include <orbis/libkernel.h>
-          #include <orbis/SystemService.h>
-          #include <sys/socket.h>
-          #include <netinet/in.h>
-          #include <arpa/inet.h>
-          #include <string.h>
-          #include <stdlib.h>
-          #include <stdio.h>
-          #include <unistd.h>
-
-          #define PORT 1000
-          #define PAGE "/app0/assets/game/index.html"
-
-          static void send_all(int fd, const char *b, long n){
-            long off = 0, r;
-            while (off < n){ r = send(fd, b + off, n - off, 0); if (r <= 0) return; off += r; }
-          }
-
-          static void serve(int fd){
-            char req[1024];
-            int n = recv(fd, req, sizeof(req) - 1, 0);
-            if (n <= 0) return;
-            req[n] = 0;
-
-            if (strstr(req, "favicon")){
-              const char *h = "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n";
-              send_all(fd, h, strlen(h)); return;
-            }
-
-            FILE *f = fopen(PAGE, "rb");
-            if (!f){
-              const char *m = "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\nmissing page";
-              send_all(fd, m, strlen(m)); return;
-            }
-
-            fseek(f, 0, SEEK_END); long len = ftell(f); fseek(f, 0, SEEK_SET);
-            char *buf = malloc(len);
-            if (!buf){ fclose(f); return; }
-            fread(buf, 1, len, f); fclose(f);
-
-            char hdr[256];
-            int hl = sprintf(hdr,
-              "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
-              "Content-Length: %ld\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n", len);
-            send_all(fd, hdr, hl);
-            send_all(fd, buf, len);
-            free(buf);
-          }
-
-          int main(void){
-            int s = socket(AF_INET, SOCK_STREAM, 0);
-            if (s < 0) return 1;
-            int one = 1;
-            setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
-
-            struct sockaddr_in a;
-            memset(&a, 0, sizeof(a));
-            a.sin_family = AF_INET;
-            a.sin_port = htons(PORT);
-            a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-
-            if (bind(s, (struct sockaddr *)&a, sizeof(a)) < 0) return 1;
-            if (listen(s, 8) < 0) return 1;
-
-            sceSystemServiceLaunchWebBrowser("http://127.0.0.1:1000/", NULL);
-
-            for (;;){
-              int c = accept(s, NULL, NULL);
-              if (c < 0) continue;
-              serve(c);
-              close(c);
-            }
-            return 0;
-          }
-          EOF
-
-      - name: Ensure page
-        run: |
-          mkdir -p petscope/assets/game
-          if [ ! -f petscope/assets/game/index.html ]; then
-            printf '<!DOCTYPE html><meta charset=utf-8><body style="background:#080c08;color:#c9d4ae;font-family:monospace;padding:40px"><h1>PETSCOPE</h1><p>host OK</p></body>' > petscope/assets/game/index.html
-            echo "::notice::no page found, using stub"
-          fi
-
-      - name: Make icon
-        run: |
-          mkdir -p petscope/sce_sys
-          python3 - <<'PY'
-          import zlib, struct
-          W = H = 512
-          def chunk(t, d):
-              c = t + d
-              return struct.pack(">I", len(d)) + c + struct.pack(">I", zlib.crc32(c) & 0xffffffff)
-          raw = b""
-          for y in range(H):
-              raw += b"\x00"
-              for x in range(W):
-                  dx, dy = x - 256, y - 256
-                  d = (dx*dx + dy*dy) ** 0.5
-                  raw += bytes((90,140,70)) if 150 < d < 200 else (bytes((12,20,12)) if d < 150 else bytes((6,10,7)))
-          png = b"\x89PNG\r\n\x1a\n"
-          png += chunk(b"IHDR", struct.pack(">IIBBBBB", W, H, 8, 2, 0, 0, 0))
-          png += chunk(b"IDAT", zlib.compress(raw, 9))
-          png += chunk(b"IEND", b"")
-          open("petscope/sce_sys/icon0.png","wb").write(png)
-          PY
-
-      - name: Build pkg
-        run: |
-          docker run --rm --user root -w /workspace -v "$PWD":/workspace \
-            openorbisofficial/toolchain:v0.5.1 \
-            bash -c 'echo "TOOLCHAIN=$OO_PS4_TOOLCHAIN"; find "$OO_PS4_TOOLCHAIN" /usr/local/bin -maxdepth 3 -type f \( -name "create-*" -o -name "PkgTool*" \) 2>/dev/null | head -40; cd petscope && make && cp -f ./*.pkg ../'
-
-      - name: Upload pkg
+      - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: petscope-pkg
-          path: "*.pkg"
+          name: petscope-eboot
+          path: eboot.bin
