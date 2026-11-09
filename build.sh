@@ -19,7 +19,7 @@ cd petscope
 # Create build directory safely
 mkdir -p build
 
-# Compile and link with explicit crt1.o and crtn.o to resolve _start
+# Compile and link directly
 clang --target=x86_64-pc-freebsd12-elf \
     -fPIC -pie -nostdlib \
     --sysroot="$OO_TOOLCHAIN" \
