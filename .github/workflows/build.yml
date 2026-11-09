@@ -3,16 +3,26 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run Open Orbis Toolchain
-        uses: OpenOrbis/toolchain-action@main
-        with:
-          version: v0.5.1
-          command: bash build.sh
+
+      - name: Make icon
+        run: |
+          mkdir -p petscope/sce_sys
+          python3 tools/make_icon.py petscope/sce_sys/icon0.png
+
+      - name: Build pkg
+        run: |
+          docker run --rm --user root -w /workspace -v "$PWD":/workspace \
+            openorbisofficial/toolchain:v0.5.1 \
+            bash -c "cd petscope && make && cp -f ./*.pkg ../"
+
       - name: Upload pkg
         uses: actions/upload-artifact@v4
         with:
