@@ -6,6 +6,13 @@ echo "Starting direct Open Orbis build and packaging..."
 
 export OO_TOOLCHAIN="/lib/OpenOrbisSDK"
 
+# Locate packaging binaries dynamically
+CREATE_FSELF=$(find "$OO_TOOLCHAIN" -name "create-fself" -print -quit)
+PKG_TOOL=$(find "$OO_TOOLCHAIN" -name "PkgTool.Core" -print -quit)
+
+echo "Found create-fself at: $CREATE_FSELF"
+echo "Found PkgTool.Core at: $PKG_TOOL"
+
 # Move into project directory
 cd petscope
 
@@ -19,22 +26,23 @@ clang --target=x86_64-pc-freebsd12-elf \
     -isystem "$OO_TOOLCHAIN/include" \
     src/main.c -o build/main.o
 
-# 2. Link into eboot.bin using -nostdlib and explicit SDK startup files
+# 2. Link into eboot.bin using SDK sysroot and library paths
 clang --target=x86_64-pc-freebsd12-elf \
-    -fuse-ld=lld -pie -nostdlib \
+    -fuse-ld=lld -pie \
     --sysroot="$OO_TOOLCHAIN" \
     -L"$OO_TOOLCHAIN/lib" \
-    "$OO_TOOLCHAIN/lib/crt1.o" \
-    "$OO_TOOLCHAIN/lib/crti.o" \
     build/main.o \
-    -lc -lkernel -lSceSystemService \
-    "$OO_TOOLCHAIN/lib/crtn.o" \
+    -lkernel -lSceSystemService -lc \
     -o eboot.bin
 
-# 3. Create signed self binary using absolute path
-"$OO_TOOLCHAIN/bin/linux/create-fself" -in eboot.bin -out eboot.bin.aced --lib "$OO_TOOLCHAIN/sce_module"
+# 3. Create signed self binary using the dynamically found path
+"$CREATE_FSELF" -in eboot.bin -out eboot.bin.aced --lib "$OO_TOOLCHAIN/sce_module"
 
-# 4. Build final PS4 .pkg file using absolute path
-"$OO_TOOLCHAIN/bin/linux/PkgTool.Core" pkg build sce_sys/param.sfo . ../petscope.pkg
+# 4. Build final PS4 .pkg file
+if [[ "$PKG_TOOL" == *.dll ]]; then
+    dotnet "$PKG_TOOL" pkg build sce_sys/param.sfo . ../petscope.pkg
+else
+    "$PKG_TOOL" pkg build sce_sys/param.sfo . ../petscope.pkg
+fi
 
 echo "Build and packaging completed successfully!"
