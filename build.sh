@@ -19,14 +19,16 @@ cd petscope
 # Create build directory safely
 mkdir -p build
 
-# Compile and link directly in one single clang command (bypassing missing crt/gcc dependencies)
+# Compile and link with explicit crt1.o and crtn.o to resolve _start
 clang --target=x86_64-pc-freebsd12-elf \
     -fPIC -pie -nostdlib \
     --sysroot="$OO_TOOLCHAIN" \
     -isystem "$OO_TOOLCHAIN/include" \
     -L"$OO_TOOLCHAIN/lib" \
+    "$OO_TOOLCHAIN/lib/crt1.o" \
     src/main.c \
-    -lkernel -lSceSystemService -lc \
+    -lc -lkernel -lSceSystemService \
+    "$OO_TOOLCHAIN/lib/crtn.o" \
     -o eboot.bin
 
 # 2. Create signed self binary
